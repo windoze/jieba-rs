@@ -182,7 +182,6 @@ impl Jieba {
     /// Load dictionary
     pub fn load_dict<R: BufRead>(&mut self, dict: &mut R) -> io::Result<()> {
         let mut buf = String::new();
-        let mut total = 0;
         while dict.read_line(&mut buf)? > 0 {
             {
                 // Skip empty lines
@@ -200,19 +199,41 @@ impl Jieba {
                 } else {
                     ""
                 };
-                total += freq;
-                self.dict.insert(word.to_string(), (freq, tag.to_string()));
-                let char_indices: Vec<usize> = word.char_indices().map(|x| x.0).collect();
-                for i in 1..char_indices.len() {
-                    let index = char_indices[i];
-                    let wfrag = &word[0..index];
-                    self.dict.entry(wfrag.to_string()).or_insert((0, "".to_string()));
-                }
+                self.add_word_with_freq_and_tag(word, freq, tag);
             }
             buf.clear();
         }
-        self.total += total;
         Ok(())
+    }
+
+    // FIXME: It's kinda stupid
+
+    /// Add word into the dictionary with frequence and tag
+    pub fn add_word_with_freq_and_tag(&mut self, word: &str, freq: usize, tag: &str) {
+        self.total += freq;
+        self.dict.insert(word.to_string(), (freq, tag.to_string()));
+        let char_indices: Vec<usize> = word.char_indices().map(|x| x.0).collect();
+        for i in 1..char_indices.len() {
+            let index = char_indices[i];
+            let wfrag = &word[0..index];
+            self.dict.entry(wfrag.to_string()).or_insert((0, "".to_string()));
+        }
+    }
+
+    /// Add word into the dictionary with frequence and empty tag
+    pub fn add_word_with_freq(&mut self, word: &str, freq: usize) {
+        self.add_word_with_freq_and_tag(word, freq, "")
+    }
+
+    /// Add word into the dictionary with suggested frequence and empty tag
+    pub fn add_word(&mut self, word: &str) {
+        let freq = self.suggest_freq(word);
+        self.add_word_with_freq(word, freq)
+    }
+
+    // Delete word from dictionary
+    pub fn del_word(&mut self, word: &str) {
+        self.add_word_with_freq(word, 0)
     }
 
     fn get_word_freq(&self, word: &str, default: usize) -> usize {
@@ -222,6 +243,22 @@ impl Jieba {
             },
             _ => default
         }
+    }
+
+    fn get_word_tag(&self, word: &str) -> String {
+        match self.dict.get(word) {
+            Some(e) => match e {
+                &(_, ref tag) => tag.to_owned()
+            },
+            _ => "".to_string()
+        }
+    }
+
+    /// Tune word frequency to suggested value 
+    pub fn tune_freq(&mut self, segment: &str) {
+        let freq = self.suggest_freq(segment);
+        let tag = self.get_word_tag(segment);
+        self.add_word_with_freq_and_tag(segment, freq, tag.as_str())
     }
 
     /// Suggest word frequency to force the characters in a word to be joined or splitted.
